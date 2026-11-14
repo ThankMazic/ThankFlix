@@ -1,0 +1,59 @@
+name: Build unsigned IPA
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main, master]
+
+jobs:
+  build:
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Tuist
+        run: |
+          brew tap tuist/tuist
+          brew install --formula tuist || curl -Ls https://install.tuist.io | bash
+
+      - name: Configure Median Swift package registry
+        run: |
+          swift package-registry set --global --scope median https://packages.median.co
+          if [ -n "$MEDIAN_SPM_TOKEN" ]; then
+            swift package-registry login https://packages.median.co --token "$MEDIAN_SPM_TOKEN" --no-confirm
+          fi
+        env:
+          MEDIAN_SPM_TOKEN: ${{ secrets.MEDIAN_SPM_TOKEN }}
+
+      - name: Generate Xcode project
+        env:
+          TUIST_PROJECT_NAME: ThankFlix
+          TUIST_TARGET_NAME: ThankFlix
+          TUIST_BUNDLE_ID: co.median.ios.lpappne
+        run: |
+          rm -f ~/.swiftpm/security/fingerprints/median.go-native-core.json
+          tuist install || true
+          tuist generate --no-open
+
+      - name: Build (no code signing)
+        run: |
+          mkdir -p build
+          xcodebuild archive \
+            -workspace ThankFlix.xcworkspace \
+            -scheme ThankFlix \
+            -configuration Release \
+            -destination 'generic/platform=iOS' \
+            -archivePath build/ThankFlix.xcarchive \
+            CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO CODE_SIGN_IDENTITY="" \
+            | tee build/xcodebuild.log | tail -50 || (tail -100 build/xcodebuild.log; exit 1)
+
+      - name: Package IPA
+        run: |
+          mkdir -p Payload
+          cp -R build/ThankFlix.xcarchive/Products/Applications/*.app Payload/
+          zip -qry ThankFlix.ipa Payload
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ThankFlix-ipa
+          path: ThankFlix.ipa
