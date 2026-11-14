@@ -57,7 +57,11 @@ jobs:
             -destination 'generic/platform=iOS' \
             -derivedDataPath "$PWD/dd" \
             CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO CODE_SIGN_IDENTITY="" \
-            2>&1 | tee xcodebuild.log | tail -40
+            > xcodebuild.log 2>&1 || {
+              echo "=================== CAC DONG LOI ==================="
+              grep -nE "error:" xcodebuild.log | head -40
+              exit 65
+            }
 
       - name: Package IPA
         run: |
@@ -77,3 +81,11 @@ jobs:
         with:
           name: ThankFlix-ipa
           path: ThankFlix.ipa
+
+      - name: Upload build log
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: xcodebuild-log
+          path: xcodebuild.log
+          if-no-files-found: ignore
