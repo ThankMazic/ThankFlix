@@ -14,8 +14,15 @@ jobs:
       - name: Install Tuist
         run: |
           brew tap tuist/tuist
-          brew install --formula tuist || curl -Ls https://install.tuist.io | bash
-
+          brew trust tuist/tuist || true
+          brew install --formula tuist/tuist/tuist || {
+            echo "brew failed, trying mise"
+            brew install mise
+            mise use -g tuist@latest
+            echo "$HOME/.local/share/mise/shims" >> $GITHUB_PATH
+          }
+          export PATH="$HOME/.local/share/mise/shims:$PATH"
+          tuist version
       - name: Configure Median Swift package registry
         run: |
           swift package-registry set --global --scope median https://packages.median.co
