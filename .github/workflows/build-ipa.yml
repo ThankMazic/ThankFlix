@@ -5,11 +5,21 @@ on:
   push:
     branches: [main, master]
 
+permissions:
+  contents: write
+
 jobs:
   build:
-    runs-on: macos-15
+    runs-on: macos-26
     steps:
       - uses: actions/checkout@v4
+
+      - name: Select Xcode 26
+        run: |
+          X=$(ls -d /Applications/Xcode_26*.app | sort -V | tail -1)
+          echo "Dung $X"
+          sudo xcode-select -s "$X"
+          xcodebuild -version
 
       - name: Install Tuist
         run: |
@@ -47,8 +57,9 @@ jobs:
           tuist generate --no-open
 
       - name: Build (no code signing)
+        id: build
+        continue-on-error: true
         run: |
-          set -o pipefail
           xcodebuild build \
             -workspace ThankFlix.xcworkspace \
             -scheme ThankFlix \
@@ -57,11 +68,27 @@ jobs:
             -destination 'generic/platform=iOS' \
             -derivedDataPath "$PWD/dd" \
             CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO CODE_SIGN_IDENTITY="" \
-            > xcodebuild.log 2>&1 || {
-              echo "=================== CAC DONG LOI ==================="
-              grep -nE "error:" xcodebuild.log | head -40
-              exit 65
-            }
+            > xcodebuild.log 2>&1
+          echo "exit=$?"
+
+      - name: Push log to build-log branch
+        if: always()
+        run: |
+          mkdir -p /tmp/logout
+          { echo "== build outcome: ${{ steps.build.outcome }} =="; \
+            echo "== ERRORS =="; grep -n -B2 -A6 "error:" xcodebuild.log | head -300; \
+            echo "== TAIL =="; tail -80 xcodebuild.log; } > /tmp/logout/summary.txt
+          cp xcodebuild.log /tmp/logout/full.log 2>/dev/null || true
+          cd /tmp/logout
+          git init -q
+          git config user.name "ci"; git config user.email "ci@example.com"
+          git checkout -q -b build-log
+          git add -A; git commit -q -m "build log"
+          git push -f "https://x-access-token:${{ github.token }}@github.com/${{ github.repository }}.git" build-log
+
+      - name: Fail if build failed
+        if: steps.build.outcome == 'failure'
+        run: exit 65
 
       - name: Package IPA
         run: |
